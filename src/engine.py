@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from ib_async import IB
 
 from src import config, position_manager
-from src.data_feed import fetch_bars_async
+from src.data_feed import fetch_latest_bars
 from src.strategy import generate_signal, check_exit
 from src.execution import place_bracket_order, cancel_all_orders, get_account_equity, compute_quantity
 
@@ -27,7 +27,7 @@ async def run_cycle(ib: IB) -> None:
 
     # 1. Fetch bars
     try:
-        df = await fetch_bars_async(ib, n_bars=config.HISTORY_BARS)
+        df = await fetch_latest_bars(ib, n_bars=config.HISTORY_BARS)
     except Exception as e:
         logger.error("Bar fetch failed: %s", e)
         return

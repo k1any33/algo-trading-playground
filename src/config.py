@@ -10,10 +10,12 @@ IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
 DRY_RUN        = os.getenv("DRY_RUN", "true").lower() == "true"
 
 # ── Instrument ────────────────────────────────────────────────────────────────
-SYMBOL       = "USDJPY"
-CURRENCY     = "USD"
-BAR_SIZE     = "4 hours"
-HISTORY_BARS = 60   # bars loaded per cycle (enough for warmup + lookback)
+SYMBOL             = "USDJPY"
+CURRENCY           = "USD"
+BAR_SIZE           = "4 hours"
+HISTORY_BARS       = 60          # bars loaded per cycle (enough for warmup + lookback)
+HISTORY_START_DATE = "2022-01-01"  # inclusive; parsed as midnight UTC
+HISTORY_END_DATE   = None          # None = fetch until today
 
 # ── Strategy parameters ───────────────────────────────────────────────────────
 FISHER_PERIOD = 10

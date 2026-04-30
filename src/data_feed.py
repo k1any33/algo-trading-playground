@@ -6,7 +6,7 @@ and the live engine's per-cycle bar refresh.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from ib_async import IB, Forex, BarDataList
@@ -20,75 +20,92 @@ def _make_contract() -> Forex:
     return Forex(config.SYMBOL)
 
 
-async def _fetch_bars(ib: IB, n_bars: int, end_dt: str = "") -> pd.DataFrame:
+async def fetch_latest_bars(ib: IB, n_bars: int = config.HISTORY_BARS) -> pd.DataFrame:
+    """Async version for use inside an already-connected IB session."""
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(hours=n_bars * 4)
+    return await _fetch_bars_in_range(ib, start_dt, end_dt)
+
+
+async def _fetch_bars_in_range(ib: IB, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+    """Fetch all bars between start_dt and end_dt, paginating backwards as needed."""
     contract = _make_contract()
     await ib.qualifyContractsAsync(contract)
 
-    # IBKR pacing: max 2000 bars per request for 4H
-    # Each 4H bar = 4 hours, so n_bars * 4 hours of data
-    # Express as days for the duration string
-    duration_days = max(1, (n_bars * 4) // 24 + 2)
-    duration_str  = f"{duration_days} D"
+    all_frames: list[pd.DataFrame] = []
+    current_end = end_dt
 
-    bars: BarDataList = await ib.reqHistoricalDataAsync(
-        contract,
-        endDateTime=end_dt,
-        durationStr=duration_str,
-        barSizeSetting=config.BAR_SIZE,
-        whatToShow="MIDPOINT",
-        useRTH=False,
-        formatDate=2,   # UTC timestamps
-        keepUpToDate=False,
-    )
+    while True:
+        end_str = current_end.strftime("%Y%m%d %H:%M:%S") + " UTC"
 
-    if not bars:
+        duration_days = min(365, (current_end - start_dt).days + 2)
+        bars: BarDataList = await ib.reqHistoricalDataAsync(
+            contract,
+            endDateTime=end_str,
+            durationStr=f"{duration_days} D",
+            barSizeSetting=config.BAR_SIZE,
+            whatToShow="MIDPOINT",
+            useRTH=False,
+            formatDate=2,
+            keepUpToDate=False,
+        )
+
+        if not bars:
+            break
+
+        df = pd.DataFrame([
+            {
+                "timestamp": b.date,
+                "open":  b.open,
+                "high":  b.high,
+                "low":   b.low,
+                "close": b.close,
+                "volume": b.volume,
+            }
+            for b in bars
+        ])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df.set_index("timestamp", inplace=True)
+        df.sort_index(inplace=True)
+
+        all_frames.append(df)
+        logger.info("Fetched page: %d bars (%s → %s)", len(df), df.index.min(), df.index.max())
+
+        if df.index.min() <= start_dt:
+            break
+
+        current_end = df.index.min().to_pydatetime()
+        await asyncio.sleep(10)
+
+    if not all_frames:
         raise RuntimeError("IBKR returned no bars — check connection and instrument")
 
-    df = pd.DataFrame([
-        {
-            "timestamp": b.date,
-            "open":  b.open,
-            "high":  b.high,
-            "low":   b.low,
-            "close": b.close,
-            "volume": b.volume,
-        }
-        for b in bars
-    ])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    df.set_index("timestamp", inplace=True)
-    df.sort_index(inplace=True)
-    df = df[~df.index.duplicated(keep="last")]
-    return df.tail(n_bars)
+    combined = pd.concat(all_frames)
+    combined = combined[~combined.index.duplicated(keep="last")]
+    combined.sort_index(inplace=True)
+    return combined[combined.index >= start_dt]
 
 
-def fetch_bars(n_bars: int = config.HISTORY_BARS) -> pd.DataFrame:
-    """Synchronous wrapper — connects, fetches, disconnects."""
-    ib = IB()
-    ib.connect(config.IBKR_HOST, config.IBKR_PORT, clientId=config.IBKR_CLIENT_ID)
-    try:
-        loop = asyncio.get_event_loop()
-        df = loop.run_until_complete(_fetch_bars(ib, n_bars))
-        logger.info("Fetched %d bars (latest: %s)", len(df), df.index[-1])
-        return df
-    finally:
-        ib.disconnect()
+def fetch_and_save_history(
+    start_date: str = config.HISTORY_START_DATE,
+    end_date: str | None = config.HISTORY_END_DATE,
+    output_path=config.HISTORY_PARQUET,
+) -> None:
+    """Download history between start_date and end_date and save to Parquet."""
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = (
+        datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if end_date
+        else datetime.now(timezone.utc)
+    )
 
-
-async def fetch_bars_async(ib: IB, n_bars: int = config.HISTORY_BARS) -> pd.DataFrame:
-    """Async version for use inside an already-connected IB session."""
-    return await _fetch_bars(ib, n_bars)
-
-
-def fetch_and_save_history(output_path=config.HISTORY_PARQUET, n_bars: int = 2000) -> None:
-    """Download full history and save to Parquet."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     ib = IB()
     ib.connect(config.IBKR_HOST, config.IBKR_PORT, clientId=config.IBKR_CLIENT_ID + 1)
     try:
         loop = asyncio.get_event_loop()
-        df = loop.run_until_complete(_fetch_bars(ib, n_bars))
+        df = loop.run_until_complete(_fetch_bars_in_range(ib, start_dt, end_dt))
         df.to_parquet(output_path)
         print(f"Saved {len(df)} bars → {output_path}")
         print(f"Date range: {df.index.min()} → {df.index.max()}")
