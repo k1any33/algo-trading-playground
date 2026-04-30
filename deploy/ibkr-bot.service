@@ -1,0 +1,19 @@
+[Unit]
+Description=Fisher Mean-Reversion Trading Bot (USDJPY)
+After=network.target ibgateway.service
+Requires=ibgateway.service
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/home/trader/algo-trading-playground
+EnvironmentFile=/home/trader/algo-trading-playground/.env
+ExecStartPre=/bin/sleep 30
+ExecStart=/home/trader/.local/bin/uv run python scripts/run_live.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=IB Gateway (paper trading) via IBC
+After=network.target
+
+[Service]
+Type=simple
+User=trader
+Environment=DISPLAY=:99
+ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1024x768x24 &
+ExecStart=/home/trader/ibc/gatewaystart.sh \
+    -ini /home/trader/ibc/config.ini \
+    -g /home/trader/ibgateway \
+    -mode paper
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

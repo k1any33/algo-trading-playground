@@ -1,0 +1,20 @@
+[project]
+name = "algo-trading-playground"
+version = "0.1.0"
+description = "Fisher Transform mean-reversion algo for USDJPY via IBKR paper trading"
+requires-python = ">=3.13"
+dependencies = [
+    "apscheduler>=3.11.2",
+    "ib-async>=2.1.0",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
+    "pyarrow>=24.0.0",
+    "python-dotenv>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4.5.7",
+    "matplotlib>=3.10.9",
+    "seaborn>=0.13.2",
+]
