@@ -1,7 +1,7 @@
 """Start the live (paper) trading engine.
 
 Usage:
-    uv run python scripts/run_live.py
+    uv run python -m scripts.run_live
 
 Set DRY_RUN=false in .env when ready to place real paper orders.
 Default: DRY_RUN=true (signal generation only, no orders placed).

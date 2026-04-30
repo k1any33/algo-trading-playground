@@ -1,7 +1,7 @@
 """Download USDJPY 4H historical data from IBKR and save to Parquet.
 
 Usage:
-    uv run python scripts/fetch_history.py
+    uv run python -m scripts.fetch_history
 """
 
 import logging

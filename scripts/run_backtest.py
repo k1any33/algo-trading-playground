@@ -1,8 +1,8 @@
 """Run Fisher Transform mean-reversion backtest on saved USDJPY data.
 
 Usage:
-    uv run python scripts/run_backtest.py
-    uv run python scripts/run_backtest.py --plot
+    uv run python -m scripts.run_backtest
+    uv run python -m scripts.run_backtest --plot
 
 Requires data/USDJPY_4hours.parquet — run scripts/fetch_history.py first.
 """
@@ -27,7 +27,7 @@ def main() -> None:
 
     if not HISTORY_PARQUET.exists():
         print(f"Data file not found: {HISTORY_PARQUET}")
-        print("Run: uv run python scripts/fetch_history.py")
+        print("Run: uv run python -m scripts/fetch_history.py")
         sys.exit(1)
 
     df = pd.read_parquet(HISTORY_PARQUET)

@@ -5,7 +5,7 @@ load_dotenv()
 
 # ── IBKR connection ───────────────────────────────────────────────────────────
 IBKR_HOST      = os.getenv("IBKR_HOST", "127.0.0.1")
-IBKR_PORT      = int(os.getenv("IBKR_PORT", "4002"))
+IBKR_PORT      = int(os.getenv("IBKR_PORT", "7496"))
 IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
 DRY_RUN        = os.getenv("DRY_RUN", "true").lower() == "true"
 
