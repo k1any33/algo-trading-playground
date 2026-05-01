@@ -7,8 +7,8 @@ Usage:
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-from src.data_feed import fetch_and_save_history
-from src.config import HISTORY_PARQUET
+from backtest.data import fetch_and_save_history
+from backtest.config import HISTORY_PARQUET
 
 if __name__ == "__main__":
     print(f"Downloading USDJPY 4H history → {HISTORY_PARQUET}")

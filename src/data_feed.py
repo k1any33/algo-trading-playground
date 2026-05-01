@@ -1,8 +1,4 @@
-"""Fetch historical 4H USD/JPY bars from IBKR and return as a DataFrame.
-
-Used both for the initial history download (scripts/fetch_history.py)
-and the live engine's per-cycle bar refresh.
-"""
+"""Fetch live 4H bars from IBKR for use in the live trading event loop."""
 
 import asyncio
 import logging
@@ -21,7 +17,6 @@ def _make_contract() -> Forex:
 
 
 async def fetch_latest_bars(ib: IB, n_bars: int = config.HISTORY_BARS) -> pd.DataFrame:
-    """Async version for use inside an already-connected IB session."""
     end_dt = datetime.now(timezone.utc)
     start_dt = end_dt - timedelta(hours=n_bars * 4)
     return await _fetch_bars_in_range(ib, start_dt, end_dt)
@@ -37,7 +32,6 @@ async def _fetch_bars_in_range(ib: IB, start_dt: datetime, end_dt: datetime) -> 
 
     while True:
         end_str = current_end.strftime("%Y%m%d %H:%M:%S") + " UTC"
-
         duration_days = min(365, (current_end - start_dt).days + 2)
         bars: BarDataList = await ib.reqHistoricalDataAsync(
             contract,
@@ -84,30 +78,3 @@ async def _fetch_bars_in_range(ib: IB, start_dt: datetime, end_dt: datetime) -> 
     combined = combined[~combined.index.duplicated(keep="last")]
     combined.sort_index(inplace=True)
     return combined[combined.index >= start_dt]
-
-
-def fetch_and_save_history(
-    start_date: str = config.HISTORY_START_DATE,
-    end_date: str | None = config.HISTORY_END_DATE,
-    output_path=config.HISTORY_PARQUET,
-) -> None:
-    """Download history between start_date and end_date and save to Parquet."""
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    end_dt = (
-        datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        if end_date
-        else datetime.now(timezone.utc)
-    )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    ib = IB()
-    ib.connect(config.IBKR_HOST, config.IBKR_PORT, clientId=config.IBKR_CLIENT_ID + 1)
-    try:
-        loop = asyncio.get_event_loop()
-        df = loop.run_until_complete(_fetch_bars_in_range(ib, start_dt, end_dt))
-        df.to_parquet(output_path)
-        print(f"Saved {len(df)} bars → {output_path}")
-        print(f"Date range: {df.index.min()} → {df.index.max()}")
-    finally:
-        ib.disconnect()
