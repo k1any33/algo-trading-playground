@@ -1,76 +1,129 @@
+import math
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
+from src.portfolio import Portfolio
 
-def compute_metrics(trades: pd.DataFrame) -> dict:
-    if trades.empty:
-        return {}
 
-    wins   = trades[trades["pnl_pct"] > 0]
-    losses = trades[trades["pnl_pct"] <= 0]
+# ── New Portfolio-based metrics ───────────────────────────────────────────────
 
-    gross_win  = wins["pnl_pct"].sum()
-    gross_loss = -losses["pnl_pct"].sum()
+@dataclass
+class BacktestMetrics:
+    # Trade counts
+    total_trades:   int
+    winning_trades: int
+    losing_trades:  int
+    stop_hits:      int
+    tp_hits:        int
 
-    eq          = trades["pnl_pct"].cumsum()
-    running_max = eq.cummax()
-    max_dd      = float((eq - running_max).min())
+    # Trade-level
+    win_rate:           float   # %
+    profit_factor:      float   # gross_profit / gross_loss
+    avg_win:            float
+    avg_loss:           float   # negative
+    avg_pnl_per_trade:  float
+    largest_win:        float
+    largest_loss:       float
 
-    span_years      = (trades["exit_time"].max() - trades["exit_time"].min()).days / 365.25
-    trades_per_year = len(trades) / max(span_years, 0.01)
-    sharpe = (
-        (trades["pnl_pct"].mean() / trades["pnl_pct"].std()) * np.sqrt(trades_per_year)
-        if trades["pnl_pct"].std() > 0 else 0.0
+    # Portfolio-level
+    starting_capital:  float
+    final_equity:      float
+    total_return_pct:  float
+    max_drawdown_pct:  float   # peak-to-trough as % of peak
+
+    # Risk-adjusted (trade-based approximation)
+    sharpe_ratio:   float
+    sortino_ratio:  float
+
+
+def compute(portfolio: Portfolio) -> BacktestMetrics:
+    trades = portfolio.trade_history
+    if not trades:
+        raise ValueError("Portfolio has no closed trades — run backtest first.")
+
+    pnls   = [t.pnl for t in trades]
+    wins   = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+
+    gross_profit = sum(wins)
+    gross_loss   = abs(sum(losses))
+
+    stop_hits = sum(1 for t in trades if t.exit_reason == "stop")
+    tp_hits   = sum(1 for t in trades if t.exit_reason == "take_profit")
+
+    equity_series  = _equity_series(portfolio)
+    trade_returns  = equity_series.pct_change().dropna()
+    peak           = equity_series.cummax()
+    max_dd_pct     = float(((equity_series - peak) / peak).min()) * 100
+
+    starting = portfolio._starting_capital
+    final    = portfolio.equity
+
+    return BacktestMetrics(
+        total_trades=len(trades),
+        winning_trades=len(wins),
+        losing_trades=len(losses),
+        stop_hits=stop_hits,
+        tp_hits=tp_hits,
+
+        win_rate=len(wins) / len(trades) * 100,
+        profit_factor=gross_profit / gross_loss if gross_loss else float("inf"),
+        avg_win=float(np.mean(wins)) if wins else 0.0,
+        avg_loss=float(np.mean(losses)) if losses else 0.0,
+        avg_pnl_per_trade=float(np.mean(pnls)),
+        largest_win=max(pnls),
+        largest_loss=min(pnls),
+
+        starting_capital=starting,
+        final_equity=final,
+        total_return_pct=(final - starting) / starting * 100,
+        max_drawdown_pct=max_dd_pct,
+
+        sharpe_ratio=_sharpe(trade_returns),
+        sortino_ratio=_sortino(trade_returns),
     )
 
-    total_return = float(trades["pnl_pct"].sum())
-    calmar = total_return / abs(max_dd) if max_dd < 0 else float("inf")
 
-    exit_breakdown = (
-        trades.groupby("exit_reason")
-        .agg(n=("pnl_pct", "count"), avg_pnl=("pnl_pct", "mean"), total_pnl=("pnl_pct", "sum"))
-        .round(3)
-        .to_dict("index")
-    )
-
-    return {
-        "total_trades"       : len(trades),
-        "wins"               : len(wins),
-        "losses"             : len(losses),
-        "win_rate"           : f"{len(wins) / len(trades) * 100:.1f}%",
-        "avg_win_pips"       : float(wins["pnl_pips"].mean()) if len(wins) else 0,
-        "avg_loss_pips"      : float(losses["pnl_pips"].mean()) if len(losses) else 0,
-        "avg_win_pct"        : float(wins["pnl_pct"].mean()) if len(wins) else 0,
-        "avg_loss_pct"       : float(losses["pnl_pct"].mean()) if len(losses) else 0,
-        "profit_factor"      : gross_win / gross_loss if gross_loss > 0 else float("inf"),
-        "expectancy_pct"     : float(trades["pnl_pct"].mean()),
-        "total_return_pct"   : total_return,
-        "max_drawdown_pct"   : max_dd,
-        "calmar"             : calmar,
-        "sharpe"             : sharpe,
-        "avg_bars_held"      : float(trades["bars_held"].mean()),
-        "exit_breakdown"     : exit_breakdown,
-    }
+def summary_df(metrics: BacktestMetrics) -> pd.DataFrame:
+    """Return metrics as a two-column DataFrame for display in a notebook."""
+    rows = [
+        ("Total trades",     metrics.total_trades),
+        ("Winning trades",   metrics.winning_trades),
+        ("Losing trades",    metrics.losing_trades),
+        ("Win rate",         f"{metrics.win_rate:.1f}%"),
+        ("Profit factor",    f"{metrics.profit_factor:.2f}"),
+        ("Avg win",          f"{metrics.avg_win:.2f}"),
+        ("Avg loss",         f"{metrics.avg_loss:.2f}"),
+        ("Largest win",      f"{metrics.largest_win:.2f}"),
+        ("Largest loss",     f"{metrics.largest_loss:.2f}"),
+        ("Avg P&L / trade",  f"{metrics.avg_pnl_per_trade:.2f}"),
+        ("Stop hits",        metrics.stop_hits),
+        ("TP hits",          metrics.tp_hits),
+        ("Starting capital", f"{metrics.starting_capital:,.2f}"),
+        ("Final equity",     f"{metrics.final_equity:,.2f}"),
+        ("Total return",     f"{metrics.total_return_pct:.2f}%"),
+        ("Max drawdown",     f"{metrics.max_drawdown_pct:.2f}%"),
+        ("Sharpe ratio",     f"{metrics.sharpe_ratio:.2f}"),
+        ("Sortino ratio",    f"{metrics.sortino_ratio:.2f}"),
+    ]
+    return pd.DataFrame(rows, columns=["Metric", "Value"]).set_index("Metric")
 
 
-def print_metrics(metrics: dict) -> None:
-    floats = {
-        k: v for k, v in metrics.items()
-        if isinstance(v, float) and k != "exit_breakdown"
-    }
-    others = {
-        k: v for k, v in metrics.items()
-        if not isinstance(v, float) and k != "exit_breakdown"
-    }
+def _equity_series(portfolio: Portfolio) -> pd.Series:
+    timestamps, equities = zip(*portfolio.equity_curve)
+    return pd.Series(list(equities), index=pd.DatetimeIndex(list(timestamps)))
 
-    print("=" * 45)
-    for k, v in others.items():
-        print(f"  {k:<22s}: {v}")
-    for k, v in floats.items():
-        print(f"  {k:<22s}: {v:>9.3f}")
-    print("-" * 45)
-    if "exit_breakdown" in metrics:
-        print("  Exit breakdown:")
-        for reason, row in metrics["exit_breakdown"].items():
-            print(f"    {reason:<8s}  n={row['n']}  avg={row['avg_pnl']:.3f}%  total={row['total_pnl']:.3f}%")
-    print("=" * 45)
+
+def _sharpe(returns: pd.Series, periods_per_year: int = 252) -> float:
+    if returns.std() == 0:
+        return 0.0
+    return float(returns.mean() / returns.std() * math.sqrt(periods_per_year))
+
+
+def _sortino(returns: pd.Series, periods_per_year: int = 252) -> float:
+    downside = returns[returns < 0]
+    if downside.empty or downside.std() == 0:
+        return 0.0
+    return float(returns.mean() / downside.std() * math.sqrt(periods_per_year))
