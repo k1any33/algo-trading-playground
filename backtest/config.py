@@ -15,7 +15,7 @@ HISTORY_PARQUET = DATA_DIR / "USDJPY_4hours.parquet"
 FISHER_PERIOD = 10
 FISHER_THRESH = 1.5
 MA_PERIOD     = 20
-RR_MULTIPLE   = 2.0
+RR_MULTIPLE   = 1.5
 PIP_SIZE      = 0.01
 
 # ── Risk management ───────────────────────────────────────────────────────────

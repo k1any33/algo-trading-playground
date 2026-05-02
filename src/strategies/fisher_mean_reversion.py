@@ -6,7 +6,8 @@ Entry conditions:
 
 Entry price: open of the bar AFTER the signal bar.
 Stop: swing high/low over the Fisher-extreme run (+ 1-pip buffer).
-Take-profit: first hit of SMA — RR-based target is left to the order manager.
+Take-profit: first hit of SMA.
+Filtered: trades where reward/risk (SMA distance / stop distance) < min_rr are skipped.
 """
 
 import pandas as pd
@@ -24,12 +25,14 @@ class FisherMeanReversion(Strategy):
         fisher_threshold: float = config.FISHER_THRESH,
         ma_period: int = config.MA_PERIOD,
         pip_size: float = config.PIP_SIZE,
+        min_rr: float = config.RR_MULTIPLE,
     ) -> None:
         self.symbol = symbol
         self.fisher_period = fisher_period
         self.fisher_threshold = fisher_threshold
         self.ma_period = ma_period
         self.pip_size = pip_size
+        self.min_rr = min_rr
 
     def generate_signals(self, df: pd.DataFrame) -> list[Signal]:
         df = df[["open", "high", "low", "close"]].copy()
@@ -56,6 +59,10 @@ class FisherMeanReversion(Strategy):
         stop_price = self._compute_stop_price(df, entry_idx, direction)
         stop_dist = abs(entry_px - stop_price)
         ma_val = float(df["ma"].iloc[-1])
+
+        reward = abs(ma_val - entry_px)
+        if stop_dist == 0 or reward / stop_dist < self.min_rr:
+            return []
 
         return [Signal(
             symbol=self.symbol,
